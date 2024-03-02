@@ -13,6 +13,8 @@ from rotary_embedding_torch import RotaryEmbedding
 
 from gateloop_transformer.associative_scan import associative_scan
 
+import math
+
 # helpers
 
 def exists(v):
@@ -31,6 +33,10 @@ def Sequential(*modules):
         return modules[0]
 
     return nn.Sequential(*modules)
+
+def quad_feat_map(x):
+    #return torch.cat([0.75*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.3*x ], dim=-1 )
+    return (x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2)
 
 # rms norm
 
@@ -189,22 +195,15 @@ class CausalFullAttention(Module):
 
 # data gated linear attention with "gateloop operator"
 
-def gate_loop_operator(q, k, v, a):
+def pklatt_op(q, k, v ):
     """
     the pseudocode in section 3.2 of the paper
     """
 
-    kv = einsum('b n d, b n e -> b n d e', k, v)
-    kv = kv + 0.j
-
-    def binary_operator(a, b):
-        a_i, kv_i = a
-        a_j, kv_j = b
-        return a_j * a_i, a_j * kv_i + kv_j
-
-    _, kv = associative_scan(binary_operator, (a, kv))
-
-    return einsum('b n d, b n d e -> b n e', q, kv.real)
+    kv = einsum('b n d, b n e -> b n d e', k, v).cumsum(2)
+    k_ = k.cumsum(2)
+    a = 1/(torch.ones_like(k).cumsum(2))
+    return (a*(1-a*q@k_))*(q.cumsum(2)+q@kv) #ehehe (yes it's dumb) #einsum('b n d, b n d e -> b n e', q, kv.real)
 
 class GateLoopedAttention(Module):
     def __init__(
@@ -259,31 +258,34 @@ class GateLoopedAttention(Module):
         frac_gradient = self.frac_gradient_state_transition
 
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)
-
+ 
         q, k, v = map(self.split_heads, (q, k, v))
 
-        a = self.to_a(x)
-        a = a * frac_gradient + a.detach() * (1 - frac_gradient)
+        q = quad_feat_map(q)
+        k = quad_feat_map(k)
 
-        a = torch.view_as_complex(a)
+        #a = self.to_a(x)
+        #a = a * frac_gradient + a.detach() * (1 - frac_gradient)
 
-        if ablate_complex:
-            a = a.real + 0.j
+        #a = torch.view_as_complex(a)
 
-        if ablate_state_transition:
-            a = torch.ones_like(a.real) + 0.j
-        else:
-            # activations for state transitions
-            # sigmoid for magnitude, identity for phase
+        #if ablate_complex:
+        #    a = a.real + 0.j
 
-            magnitude, phase = a.abs(), a.angle()
-            a = torch.polar(magnitude.sigmoid(), phase)
+        #if ablate_state_transition:
+        #    a = torch.ones_like(a.real) + 0.j
+        #else:
+        #    # activations for state transitions
+        #    # sigmoid for magnitude, identity for phase
+
+        #    magnitude, phase = a.abs(), a.angle()
+        #    a = torch.polar(magnitude.sigmoid(), phase)
 
         need_backwards = any([t.requires_grad for t in (q, k, v, a)])
 
-        fn = partial(checkpoint, gate_loop_operator) if need_backwards and self.checkpoint_gate_looped_attn else gate_loop_operator
+        fn = partial(checkpoint, pklatt_op ) if need_backwards and self.checkpoint_gate_looped_attn else pklatt_op
 
-        out = fn(q, k, v, a)
+        out = fn(q, k, v )
 
         out = self.merge_heads(out)
 

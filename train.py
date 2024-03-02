@@ -17,11 +17,11 @@ from gateloop_transformer import Transformer
 
 # constants
 
-NUM_BATCHES = int(1e5)
-BATCH_SIZE = 4
+NUM_BATCHES = int(2.5e4) #int(1e5)
+BATCH_SIZE = 16
 GRAD_ACCUM_EVERY = 4
-LEARNING_RATE = 1e-4
-WEIGHT_DECAY = 0.
+LEARNING_RATE = 1e-3 #8e-4
+WEIGHT_DECAY = 5e-6 #0.
 VALIDATE_EVERY = 100
 PRIME_LENGTH = 128
 GENERATE_EVERY = 500
@@ -29,8 +29,8 @@ GENERATE_LENGTH = 512
 SEQ_LEN = 256
 
 WANDB = True
-PROJECT_NAME = 'gateloop'
-RUN_NAME = 'baseline gateloop'
+PROJECT_NAME = 'pklatt'
+RUN_NAME = '0'#'baseline gateloop'
 
 # hf accelerate
 
@@ -135,10 +135,10 @@ def get_optimizer(
 
 hparams = dict(
     num_tokens = 256,
-    dim = 512,
-    depth = 6,
+    dim = 128, #480, #320, #160,
+    depth = 8,
     use_gate_looped_attn = True,
-    gate_loop_heads = 512,              # in paper, they used heads == dim, but should experiment with less heads, as memory allows. we should figure out how much max-heads contributed to the performance, if any
+    gate_loop_heads = 32,              # in paper, they used heads == dim, but should experiment with less heads, as memory allows. we should figure out how much max-heads contributed to the performance, if any
     data_dependent_rel_pos = False,
     attn_softmax_normalize = True,
     ablate_complex = False,

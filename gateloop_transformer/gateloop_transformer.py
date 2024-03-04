@@ -36,7 +36,7 @@ def Sequential(*modules):
 
 def quad_feat_map(x):
     #return torch.cat([0.75*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.3*x ], dim=-1 )
-    return (x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2)
+    return torch.cat([0.72*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.06*x, torch.ones(x.shape[:-1]+(1,)).to(x.device)], dim=-1 )
 
 # rms norm
 
@@ -196,14 +196,20 @@ class CausalFullAttention(Module):
 # data gated linear attention with "gateloop operator"
 
 def pklatt_op(q, k, v ):
-    """
-    the pseudocode in section 3.2 of the paper
-    """
 
-    kv = einsum('b n d, b n e -> b n d e', k, v).cumsum(2)
-    k_ = k.cumsum(2)
-    a = 1/(torch.ones_like(k).cumsum(2))
-    return (a*(1-a*q@k_))*(q.cumsum(2)+q@kv) #ehehe (yes it's dumb) #einsum('b n d, b n d e -> b n e', q, kv.real)
+    F.normalize(q, dim=-1 )
+    F.normalize(k, dim=-1 )
+    q = quad_feat_map(q)
+    k = quad_feat_map(k)
+
+    kv = einsum('b n d, b n e -> b n d e', k, v ).cumsum(1)
+    k_ = k.cumsum(1)
+    qk_ = einsum('bnd,bnd->bn', q, k_ ).unsqueeze(-1)
+    qkv = einsum('bnd,bnde->bne', q, kv )
+
+    return (qkv)/(qk_)
+
+
 
 class GateLoopedAttention(Module):
     def __init__(
@@ -227,6 +233,8 @@ class GateLoopedAttention(Module):
         assert (dim_inner % heads) == 0, f'dimension for gate looped attention {dim_inner} must be divisible by number of gate loop heads {heads}'
 
         self.split_heads = Rearrange('b n (h d) -> (b h) n d', h = heads)
+
+        self.rotary_emb = RotaryEmbedding(dim_inner//heads) 
 
         self.to_qkv = nn.Linear(dim, dim_inner * 3, bias = False)
 
@@ -258,30 +266,13 @@ class GateLoopedAttention(Module):
         frac_gradient = self.frac_gradient_state_transition
 
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)
- 
+  
         q, k, v = map(self.split_heads, (q, k, v))
 
-        q = quad_feat_map(q)
-        k = quad_feat_map(k)
+        q = self.rotary_emb.rotate_queries_or_keys(q)
+        k = self.rotary_emb.rotate_queries_or_keys(k)
 
-        #a = self.to_a(x)
-        #a = a * frac_gradient + a.detach() * (1 - frac_gradient)
-
-        #a = torch.view_as_complex(a)
-
-        #if ablate_complex:
-        #    a = a.real + 0.j
-
-        #if ablate_state_transition:
-        #    a = torch.ones_like(a.real) + 0.j
-        #else:
-        #    # activations for state transitions
-        #    # sigmoid for magnitude, identity for phase
-
-        #    magnitude, phase = a.abs(), a.angle()
-        #    a = torch.polar(magnitude.sigmoid(), phase)
-
-        need_backwards = any([t.requires_grad for t in (q, k, v, a)])
+        need_backwards = any([t.requires_grad for t in (q, k, v )])
 
         fn = partial(checkpoint, pklatt_op ) if need_backwards and self.checkpoint_gate_looped_attn else pklatt_op
 

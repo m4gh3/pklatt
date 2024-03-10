@@ -25,12 +25,12 @@ WEIGHT_DECAY = 1.25e-6 #0.
 VALIDATE_EVERY = 100
 PRIME_LENGTH = 128
 GENERATE_EVERY = 500
-GENERATE_LENGTH = 512
-SEQ_LEN = 256
+GENERATE_LENGTH = 1024 #512
+SEQ_LEN = 512 #256
 
 WANDB = True
 PROJECT_NAME = 'pklatt'
-RUN_NAME = '2j'#'baseline gateloop'
+RUN_NAME = '3b'#'baseline gateloop'
 
 # hf accelerate
 
@@ -135,10 +135,11 @@ def get_optimizer(
 
 hparams = dict(
     num_tokens = 256,
-    dim = 256, #480, #320, #160,
+    dim = 384, #256, #480, #320, #160
+    dim_gate_looped_attn = 96, #64,
     depth = 8,
     use_gate_looped_attn = True,
-    gate_loop_heads = 16,              # in paper, they used heads == dim, but should experiment with less heads, as memory allows. we should figure out how much max-heads contributed to the performance, if any
+    gate_loop_heads = 8,              # in paper, they used heads == dim, but should experiment with less heads, as memory allows. we should figure out how much max-heads contributed to the performance, if any
     data_dependent_rel_pos = False,
     attn_softmax_normalize = True,
     ablate_complex = False,
@@ -195,7 +196,7 @@ optim = get_optimizer(
 )
 
 #schedulwee
-#scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, 'min', patience=200, factor=0.75 )
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optim, 'min', patience=200, factor=0.75 )
 
 # prepare
 
@@ -232,7 +233,7 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
     torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
 
     optim.step()
-    #scheduler.step(loss)
+    scheduler.step(loss)
     optim.zero_grad()
     
     accelerator.wait_for_everyone()

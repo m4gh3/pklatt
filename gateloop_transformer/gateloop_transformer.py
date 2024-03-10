@@ -37,6 +37,8 @@ def Sequential(*modules):
 def quad_feat_map(x):
     #return torch.cat([0.75*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.3*x ], dim=-1 )
     return torch.cat([0.72*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.06*x, torch.ones(x.shape[:-1]+(1,)).to(x.device)], dim=-1 )
+    #return torch.cat([x, 1.05*torch.ones(x.shape[:-1]+(1,)).to(x.device)], dim=-1 )
+
 
 # rms norm
 
@@ -68,6 +70,15 @@ class PostNorm(Module):
 
     def forward(self, x, **kwargs):
         return self.norm(self.fn(x, **kwargs) + x)
+
+class CaConv1d(Module):
+    def __init__(self, in_ch, out_ch, ker_sz, groups=1, bias=True ):
+        super().__init__()
+        self.conv = nn.Conv1d(in_ch, out_ch, ker_sz, padding=ker_sz-1 )
+
+    def forward(self, x ):
+        s_len = x.size(1)
+        return (self.conv(x.permute(0,2,1))[...,:s_len]).permute(0,2,1)
 
 # feedforward
 
@@ -236,7 +247,7 @@ class GateLoopedAttention(Module):
 
         self.rotary_emb = RotaryEmbedding(dim_inner//heads) 
 
-        self.to_qkv = nn.Linear(dim, dim_inner * 3, bias = False)
+        self.to_qkv = CaConv1d(dim, dim_inner * 3, 5, bias=False ) #nn.Linear(dim, dim_inner * 3, bias = False)
 
         self.to_a = nn.Sequential(
             nn.Linear(dim, heads * 2),

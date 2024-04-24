@@ -25,12 +25,12 @@ WEIGHT_DECAY = 1.25e-6 #0.
 VALIDATE_EVERY = 100
 PRIME_LENGTH = 128
 GENERATE_EVERY = 500
-GENERATE_LENGTH = 1024 #512
-SEQ_LEN = 512 #256
+GENERATE_LENGTH = 2048 #1024 #512
+SEQ_LEN = 1024 #512 #256
 
 WANDB = True
-PROJECT_NAME = 'pklatt'
-RUN_NAME = '3b'#'baseline gateloop'
+PROJECT_NAME = 'clak_lstm'
+RUN_NAME = '0c' #'3c'#'baseline gateloop'
 
 # hf accelerate
 
@@ -135,11 +135,11 @@ def get_optimizer(
 
 hparams = dict(
     num_tokens = 256,
-    dim = 384, #256, #480, #320, #160
-    dim_gate_looped_attn = 96, #64,
-    depth = 8,
+    dim = 256, #512, #384, #256, #480, #320, #160
+    dim_gate_looped_attn = 64, #120, #96, #64,
+    depth = 4, #8,
     use_gate_looped_attn = True,
-    gate_loop_heads = 8,              # in paper, they used heads == dim, but should experiment with less heads, as memory allows. we should figure out how much max-heads contributed to the performance, if any
+    gate_loop_heads = 8, #8,              # in paper, they used heads == dim, but should experiment with less heads, as memory allows. we should figure out how much max-heads contributed to the performance, if any
     data_dependent_rel_pos = False,
     attn_softmax_normalize = True,
     ablate_complex = False,

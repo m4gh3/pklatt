@@ -36,8 +36,10 @@ def Sequential(*modules):
 
 def quad_feat_map(x):
     #return torch.cat([0.75*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.3*x ], dim=-1 )
-    return torch.cat([0.72*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.06*x, torch.ones(x.shape[:-1]+(1,)).to(x.device)], dim=-1 )
-    #return torch.cat([x, 1.05*torch.ones(x.shape[:-1]+(1,)).to(x.device)], dim=-1 )
+    #return torch.cat([0.72*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.06*x, torch.ones(x.shape[:-1]+(1,)).to(x.device)], dim=-1 )
+    alpha = torch.linalg.vector_norm(x, dim=-1 ).unsqueeze(-1)
+    x = F.normalize(x, dim=-1 )
+    return torch.cat([(1-0.5**alpha)*x, torch.ones(x.shape[:-1]+(1,)).to(x.device)], dim=-1 )
 
 
 # rms norm
@@ -208,8 +210,8 @@ class CausalFullAttention(Module):
 
 def pklatt_op(q, k, v ):
 
-    F.normalize(q, dim=-1 )
-    F.normalize(k, dim=-1 )
+    #F.normalize(q, dim=-1 )
+    #F.normalize(k, dim=-1 )
     q = quad_feat_map(q)
     k = quad_feat_map(k)
 
@@ -249,10 +251,10 @@ class GateLoopedAttention(Module):
 
         self.to_qkv = CaConv1d(dim, dim_inner * 3, 5, bias=False ) #nn.Linear(dim, dim_inner * 3, bias = False)
 
-        self.to_a = nn.Sequential(
-            nn.Linear(dim, heads * 2),
-            Rearrange('b n (h c) -> (b h) n 1 1 c', h = heads, c = 2)
-        )
+        #self.to_a = nn.Sequential(
+        #    nn.Linear(dim, heads * 2),
+        #    Rearrange('b n (h c) -> (b h) n 1 1 c', h = heads, c = 2)
+        #)
 
         self.merge_heads = Rearrange('(b h) n d -> b n (h d)', h = heads)
 
@@ -267,6 +269,7 @@ class GateLoopedAttention(Module):
             )
 
         self.to_out = nn.Linear(dim_inner, dim, bias = False) if dim_inner != dim or add_swish_gating else nn.Identity()
+        self.hlstm = nn.LSTM(dim_inner//heads, dim_inner//heads, dim_inner//heads, batch_first=True )
 
     def forward(
         self,
@@ -274,6 +277,7 @@ class GateLoopedAttention(Module):
         ablate_complex = False,
         ablate_state_transition = False
     ):
+        #print(x.shape)
         frac_gradient = self.frac_gradient_state_transition
 
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)
@@ -288,6 +292,9 @@ class GateLoopedAttention(Module):
         fn = partial(checkpoint, pklatt_op ) if need_backwards and self.checkpoint_gate_looped_attn else pklatt_op
 
         out = fn(q, k, v )
+        #print(out.shape)
+        out_, _ = self.hlstm(out)
+        out = out_ + out
 
         out = self.merge_heads(out)
 
@@ -295,8 +302,11 @@ class GateLoopedAttention(Module):
 
         if exists(self.to_gates):
             out = self.to_gates(x) * out
+        #out_, _ = self.to_out0(out)
+        #out = out + out_
+        out = self.to_out(out)
 
-        return self.to_out(out)
+        return out
 
 # main class
 

@@ -15,6 +15,9 @@ from accelerate import Accelerator
 
 from gateloop_transformer import Transformer
 
+from tokenizers import ByteLevelBPETokenizer
+tokenizer = ByteLevelBPETokenizer.from_file(vocab_filename='bl_bpe/vocab.json', merges_filename='bl_bpe/merges.txt' )
+
 # constants
 
 NUM_BATCHES = int(2.5e4) #int(1e5)
@@ -25,12 +28,12 @@ WEIGHT_DECAY = 1.25e-6 #0.
 VALIDATE_EVERY = 100
 PRIME_LENGTH = 128
 GENERATE_EVERY = 500
-GENERATE_LENGTH =  256 #2048 #1024 #512
-SEQ_LEN = 256 #1024 #512 #256
+GENERATE_LENGTH =  512 #2048 #1024 #512
+SEQ_LEN = 512 #1024 #512 #256
 
 WANDB = True
 PROJECT_NAME = 'clak_lstm'
-RUN_NAME = '0d' #'3c'#'baseline gateloop'
+RUN_NAME = '0.tok.c' #'3c'#'baseline gateloop'
 
 # hf accelerate
 
@@ -46,11 +49,12 @@ def cycle(loader):
         for data in loader:
             yield data
 
-def decode_token(token):
-    return str(chr(max(32, token)))
+#def decode_token(token):
+#    return str(chr(max(32, token)))
 
 def decode_tokens(tokens):
-    return "".join(list(map(decode_token, tokens)))
+    return tokenizer.decode(tokens.cpu().numpy())
+    #return "".join(list(map(decode_token, tokens)))
 
 # sampling helpers
 
@@ -134,10 +138,10 @@ def get_optimizer(
 # instantiate transformer
 
 hparams = dict(
-    num_tokens = 256,
+    num_tokens = tokenizer.get_vocab_size(), #256,
     dim = 256, #512, #384, #256, #480, #320, #160
-    dim_gate_looped_attn = 64, #120, #96, #64,
-    depth = 4, #8,
+    dim_gate_looped_attn = 128, #120, #96, #64,
+    depth = 8, #4, #8,
     use_gate_looped_attn = True,
     gate_loop_heads = 8, #8,              # in paper, they used heads == dim, but should experiment with less heads, as memory allows. we should figure out how much max-heads contributed to the performance, if any
     data_dependent_rel_pos = False,
@@ -163,10 +167,14 @@ if WANDB and exists(RUN_NAME) and len(accelerator.trackers) > 0:
 
 # prepare enwik8 data
 
-with gzip.open("./data/enwik8.gz") as file:
-    data = np.frombuffer(file.read(int(95e6)), dtype=np.uint8).copy()
-    np_train, np_valid = np.split(data, [int(90e6)])
-    data_train, data_val = torch.from_numpy(np_train), torch.from_numpy(np_valid)
+    #with gzip.open("./data/enwik8.gz") as file:
+    #    data = np.frombuffer(file.read(int(95e6)), dtype=np.uint8).copy()
+    #    np_train, np_valid = np.split(data, [int(90e6)])
+    #    data_train, data_val = torch.from_numpy(np_train), torch.from_numpy(np_valid)
+data = np.load('data/enwik8.npy')
+np_train, np_valid = np.split(data, [int(35e6)] )
+data_train, data_val = torch.from_numpy(np_train), torch.from_numpy(np_valid)
+
 
 class TextSamplerDataset(Dataset):
     def __init__(self, data, seq_len):

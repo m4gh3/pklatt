@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from einops import rearrange
 from einops.layers.torch import Rearrange
 
-from rotary_embedding_torch import RotaryEmbedding
+#from rotary_embedding_torch import RotaryEmbedding
 
 from gateloop_transformer.associative_scan import associative_scan
 
@@ -92,120 +92,6 @@ def FeedForward(dim, mult = 4):
         nn.Linear(dim_inner, dim)
     )
 
-# attention
-
-class CausalFullAttention(Module):
-    def __init__(
-        self,
-        dim,
-        *,
-        dim_head = 64,
-        heads = 8,
-        rotary_emb = False,
-        add_swish_gating = False,
-        data_dependent_rel_pos = False,
-        frac_gradient_data_dependent_rel_pos = 0.5,
-        softmax_normalize = None
-    ):
-        super().__init__()
-        dim_inner = dim_head * heads
-        self.softmax_normalize = default(softmax_normalize, not data_dependent_rel_pos)
-
-        self.scale = dim_head ** -0.5
-
-        self.rotary_emb = RotaryEmbedding(dim_head) if rotary_emb else None
-
-        self.to_qkv = nn.Sequential(
-            nn.Linear(dim, dim_inner * 3, bias = False),
-            Rearrange('b n (qkv h d) -> qkv b h n d', h = heads, qkv = 3)
-        )
-
-        self.data_dependent_rel_pos = data_dependent_rel_pos
-        self.frac_gradient_data_dependent_rel_pos = frac_gradient_data_dependent_rel_pos
-
-        if data_dependent_rel_pos:
-            self.to_a = nn.Sequential(
-                nn.Linear(dim, dim_inner, bias = False),
-                Rearrange('b n (h d c) -> b h n d c', h = heads, c = 2)
-            )
-
-        self.to_gates = None
-
-        if add_swish_gating:
-            self.to_gates = nn.Sequential(
-                nn.Linear(dim, dim_inner, bias = False),
-                nn.SiLU(),
-                Rearrange('b n (h d) -> b h n d', h = heads)
-            )
-
-        self.to_out = nn.Sequential(
-            Rearrange('b h n d -> b n (h d)'),
-            nn.Linear(dim_inner, dim)
-        )
-
-    def forward(
-        self,
-        x,
-        ablate_complex = False,
-        ablate_state_transition = False
-    ):
-        q, k, v = self.to_qkv(x)
-
-        if exists(self.rotary_emb):
-            q = self.rotary_emb.rotate_queries_or_keys(q)
-            k = self.rotary_emb.rotate_queries_or_keys(k)
-
-        q = q * self.scale
-
-        if self.data_dependent_rel_pos and not ablate_state_transition:
-            frac_gradient = self.frac_gradient_data_dependent_rel_pos
-
-            a = self.to_a(x)
-
-            # allow for data dependent relative position projection to change more slowly
-            # alternative to using a lowered learning rate mentioned in paper
-
-            a = a * frac_gradient + a.detach() * (1 - frac_gradient)
-
-            a = torch.view_as_complex(a)
-
-            if ablate_complex:
-                a = a.real + 0.j
-
-            magnitude, phase = a.abs(), a.angle()
-            a = torch.polar(magnitude.sigmoid(), phase)
-
-            a = rearrange(a, '... -> ... 1')
-            a_cumprod = a.cumprod(dim = -2)
-
-            a_cumprod_real = a_cumprod.real.clamp(min = 1e-10)
-            a_cumprod_real_inverse = 1. / a_cumprod_real
-
-            q, k = map(lambda t: rearrange(t, '... (d c) -> ... d c', c = 2), (q, k))
-
-            q = q * a_cumprod_real
-            k = k * a_cumprod_real_inverse
-
-            q, k = map(lambda t: rearrange(t, '... d c -> ... (d c)'), (q, k))
-
-        sim = einsum('b h i d, b h j d -> b h i j', q, k)
-
-        i, j = sim.shape[2:]
-        causal_mask = torch.ones((i, j), dtype = torch.bool, device = x.device).triu(j - i + 1)
-
-        if self.softmax_normalize:
-            sim = sim.masked_fill(causal_mask, -torch.finfo(sim.dtype).max)
-            attn = sim.softmax(dim = -1)
-        else:
-            attn = sim.masked_fill(causal_mask, 0.)
-
-        out = einsum('b h i j, b h j d -> b h i d', attn, v)
-
-        if exists(self.to_gates):
-            out = out * self.to_gates(x)
-
-        return self.to_out(out)
-
 # data gated linear attention with "gateloop operator"
 
 def pklatt_op(q, k, v ):
@@ -247,7 +133,7 @@ class GateLoopedAttention(Module):
 
         self.split_heads = Rearrange('b n (h d) -> (b h) n d', h = heads)
 
-        self.rotary_emb = RotaryEmbedding(dim_inner//heads) 
+        #self.rotary_emb = RotaryEmbedding(dim_inner//heads) 
 
         self.to_qkv = CaConv1d(dim, dim_inner * 3, 5, bias=False ) #nn.Linear(dim, dim_inner * 3, bias = False)
 
@@ -284,8 +170,8 @@ class GateLoopedAttention(Module):
   
         q, k, v = map(self.split_heads, (q, k, v))
 
-        q = self.rotary_emb.rotate_queries_or_keys(q)
-        k = self.rotary_emb.rotate_queries_or_keys(k)
+        #q = self.rotary_emb.rotate_queries_or_keys(q)
+        #k = self.rotary_emb.rotate_queries_or_keys(k)
 
         need_backwards = any([t.requires_grad for t in (q, k, v )])
 
@@ -346,28 +232,16 @@ class Transformer(Module):
 
         for _ in range(depth):
 
-            if use_gate_looped_attn:
-                spatial_mixer = GateLoopedAttention(
-                    dim = dim,
-                    heads = gate_loop_heads,
-                    dim_inner = dim_gate_looped_attn,
-                    add_swish_gating = attn_add_swish_gating,
-                    sub_ln = sub_ln,
-                    checkpoint_gate_looped_attn = checkpoint_gate_looped_attn,
-                    frac_gradient_state_transition = frac_gradient_state_transition
-                )
-            else:
-                spatial_mixer = CausalFullAttention(
-                    dim = dim,
-                    dim_head = dim_head,
-                    heads = heads,
-                    rotary_emb = rotary_emb,
-                    add_swish_gating = attn_add_swish_gating,
-                    softmax_normalize = attn_softmax_normalize,
-                    data_dependent_rel_pos = data_dependent_rel_pos,
-                    frac_gradient_data_dependent_rel_pos = frac_gradient_state_transition
-                )
-
+            spatial_mixer = GateLoopedAttention(
+                dim = dim,
+                heads = gate_loop_heads,
+                dim_inner = dim_gate_looped_attn,
+                add_swish_gating = attn_add_swish_gating,
+                sub_ln = sub_ln,
+                checkpoint_gate_looped_attn = checkpoint_gate_looped_attn,
+                frac_gradient_state_transition = frac_gradient_state_transition
+            ) 
+            
             channelwise_mixer = FeedForward(
                 dim = dim,
                 mult = ff_mult

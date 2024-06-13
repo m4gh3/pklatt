@@ -35,8 +35,13 @@ def Sequential(*modules):
     return nn.Sequential(*modules)
 
 def quad_feat_map(x):
+    y = torch.ones(x.shape[:-1]+(1,)).to(x.device)
+    x = torch.cat([x, y], dim=-1 )
+    x = F.normalize(x, dim=-1 )
+    return torch.cat([x, y], dim=-1 )
     #return torch.cat([0.75*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.3*x ], dim=-1 )
-    return torch.cat([0.72*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.06*x, torch.ones(x.shape[:-1]+(1,)).to(x.device)], dim=-1 )
+    #return torch.cat([0.72*(x.unsqueeze(-1)*x.unsqueeze(-2)).flatten(start_dim=-2), 1.06*x, torch.ones(x.shape[:-1]+(1,)).to(x.device)], dim=-1 )
+    
 
 # rms norm
 
@@ -197,8 +202,8 @@ class CausalFullAttention(Module):
 
 def pklatt_op(q, k, v ):
 
-    F.normalize(q, dim=-1 )
-    F.normalize(k, dim=-1 )
+    #F.normalize(q, dim=-1 )
+    #F.normalize(k, dim=-1 )
     q = quad_feat_map(q)
     k = quad_feat_map(k)
 
@@ -263,6 +268,7 @@ class GateLoopedAttention(Module):
         ablate_complex = False,
         ablate_state_transition = False
     ):
+
         frac_gradient = self.frac_gradient_state_transition
 
         q, k, v = self.to_qkv(x).chunk(3, dim = -1)

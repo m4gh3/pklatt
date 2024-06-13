@@ -29,8 +29,8 @@ GENERATE_LENGTH = 512
 SEQ_LEN = 256
 
 WANDB = True
-PROJECT_NAME = 'pklatt'
-RUN_NAME = '2j'#'baseline gateloop'
+PROJECT_NAME = 'lka'
+RUN_NAME = '0'#'baseline gateloop'
 
 # hf accelerate
 
@@ -136,9 +136,9 @@ def get_optimizer(
 hparams = dict(
     num_tokens = 256,
     dim = 256, #480, #320, #160,
-    depth = 8,
+    depth = 4,
     use_gate_looped_attn = True,
-    gate_loop_heads = 16,              # in paper, they used heads == dim, but should experiment with less heads, as memory allows. we should figure out how much max-heads contributed to the performance, if any
+    gate_loop_heads = 8,              # in paper, they used heads == dim, but should experiment with less heads, as memory allows. we should figure out how much max-heads contributed to the performance, if any
     data_dependent_rel_pos = False,
     attn_softmax_normalize = True,
     ablate_complex = False,
